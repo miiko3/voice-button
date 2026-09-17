@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Download Vosk model
+        shell: pwsh
+        run: |
+          curl.exe -L -o model.zip https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip
+          Expand-Archive model.zip -DestinationPath .\models
+      - name: Run tests
+        run: python -m pytest -v
+
+  build:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Download Vosk model
+        shell: pwsh
+        run: |
+          curl.exe -L -o model.zip https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip
+          Expand-Archive model.zip -DestinationPath .\models
+      - name: Build exe
+        run: pyinstaller --noconfirm --clean voicebutton.spec
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoiceButton-exe
+          path: dist/VoiceButton.exe
+      - name: Create release and upload exe
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.${{ github.run_number }}
+          name: Voice Button v0.1.${{ github.run_number }}
+          files: dist/VoiceButton.exe
+          generate_release_notes: true
