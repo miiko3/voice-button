@@ -9,6 +9,18 @@ from voicebutton.app import VoiceButtonApp
 MUTEX_NAME = 'Local\\VoiceButtonSingleton'
 
 
+def _dpi_aware():
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
 def _single_instance():
     handle = ctypes.windll.kernel32.CreateMutexW(None, False, MUTEX_NAME)
     if ctypes.windll.kernel32.GetLastError() == 183:
@@ -17,6 +29,7 @@ def _single_instance():
 
 
 def main():
+    _dpi_aware()
     if not _single_instance():
         return
     try:

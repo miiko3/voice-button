@@ -5,6 +5,10 @@ import queue
 import sys
 import time
 import tkinter as tk
+import tkinter.font as tkfont
+from ctypes import wintypes
+
+user32 = ctypes.WinDLL('user32', use_last_error=True)
 
 BG = '#171a21'
 ACCENT = '#66c2ff'
@@ -15,6 +19,21 @@ KEY = '#ff00ff'
 
 WIDTH = 280
 HEIGHT = 64
+BARS = 5
+TICK_MS = 25
+HIDE_DELAY = 3.0
+
+GWL_EXSTYLE = -20
+WS_EX_TRANSPARENT = 0x00000020
+WS_EX_TOOLWINDOW = 0x00000080
+WS_EX_NOACTIVATE = 0x08000000
+
+user32.GetParent.argtypes = [wintypes.HWND]
+user32.GetParent.restype = wintypes.HWND
+user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.GetWindowLongW.restype = wintypes.LONG
+user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.LONG]
+user32.SetWindowLongW.restype = wintypes.LONG
 
 
 def asset_path(name):
@@ -63,7 +82,7 @@ class Capsule:
         self._load_logo()
         self.root.withdraw()
         self._make_click_through()
-        self.root.after(25, self._tick)
+        self.root.after(TICK_MS, self._tick)
 
     def set_level_source(self, fn):
         self._level_source = fn
@@ -80,34 +99,44 @@ class Capsule:
     def _paint(self):
         c = self.canvas
         w, h = self.width, self.height
-        c.create_rectangle(0, 0, w, h, fill=BG, outline='')
+        c.create_rectangle(h // 2, 0, w - h // 2, h, fill=BG, outline='')
         c.create_oval(0, 0, h, h, fill=BG, outline='')
         c.create_oval(w - h, 0, w, h, fill=BG, outline='')
 
         bx = 24
         bar_w = 7
         gap = 4
-        for i in range(5):
+        for i in range(BARS):
             bar = c.create_rectangle(bx, h // 2 - 6, bx + bar_w, h // 2 + 6, fill=ACCENT, outline='')
             self._bars.append(bar)
             bx += bar_w + gap
-        self._label = c.create_text(84, h // 2, text='', fill=TEXT, font=('Segoe UI', 13), anchor='w')
+        self._font = tkfont.Font(root=self.root, family='Segoe UI', size=13)
+        self._label = c.create_text(84, h // 2, text='', fill=TEXT, font=self._font, anchor='w')
 
     def _load_logo(self):
         try:
-            self._logo_source = tk.PhotoImage(file=asset_path('logo.png'))
+            self._logo_source = tk.PhotoImage(master=self.root, file=asset_path('logo.png'))
+            self._logo_image = self._logo_source.subsample(20, 20)
+            self.canvas.create_image(self.width - 24, self.height // 2, image=self._logo_image, anchor='center')
         except Exception:
             self._logo_source = None
-            return
-        self._logo_image = self._logo_source.subsample(20, 20)
-        self.canvas.create_image(self.width - 24, self.height // 2, image=self._logo_image, anchor='center')
+            self._logo_image = None
+
+    def _hwnd(self):
+        try:
+            child = self.root.winfo_id()
+            return user32.GetParent(child) or child
+        except Exception:
+            return 0
 
     def _make_click_through(self):
         try:
-            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
-            ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, -20)
-            ex_style = ex_style | 0x20 | 0x08000000 | 0x00080000
-            ctypes.windll.user32.SetWindowLongW(hwnd, -20, ex_style)
+            hwnd = self._hwnd()
+            if not hwnd:
+                return
+            style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            style |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
         except Exception:
             pass
 
@@ -129,13 +158,13 @@ class Capsule:
             elif kind == 'error':
                 self._state = 'error'
                 self._message = message[1]
-                self._err_until = time.monotonic() + 3.0
+                self._err_until = time.monotonic() + HIDE_DELAY
                 self.root.deiconify()
             elif kind == 'quit':
                 self.root.quit()
                 return
         self._animate()
-        self.root.after(25, self._tick)
+        self.root.after(TICK_MS, self._tick)
 
     def _animate(self):
         if self._state == 'idle':
@@ -148,10 +177,23 @@ class Capsule:
                 return
         if self._state == 'recording' and self._level_source:
             raw = self._level_source()
-            self._level = self._level * 0.7 + max(0.0, min(raw, 1.0)) * 0.3
+            raw = 0.0 if raw is None else float(raw)
+            if raw < 0.0:
+                raw = 0.0
+            elif raw > 1.0:
+                raw = 1.0
+            self._level = self._level * 0.55 + raw * 0.45 if raw > self._level else self._level * 0.82
         self._phase += 1
         self._update_bars()
         self._update_text()
+
+    def _fit_text(self, text):
+        limit = self.width - 84 - 40
+        if self._font.measure(text) <= limit:
+            return text
+        while text and self._font.measure(text + '…') > limit:
+            text = text[:-1]
+        return text.rstrip() + '…' if text else ''
 
     def _update_bars(self):
         c = self.canvas
@@ -165,7 +207,7 @@ class Capsule:
             else:
                 wobble = 0.6 + 0.4 * math.sin(self._phase * 0.35 + i * 1.3)
                 dy = 4 + self._level * wobble * (max_dy - 4)
-                fill = ACCENT if self._state == 'recording' else ERROR
+                fill = ACCENT if self._state in ('recording', 'startup') else ERROR
             c.coords(bar, 24 + i * 11, h // 2 - dy, 24 + i * 11 + 7, h // 2 + dy)
             c.itemconfigure(bar, fill=fill)
 
@@ -176,17 +218,4 @@ class Capsule:
             text = 'Обработка…'
         else:
             text = self._message
-        if len(text) > 22:
-            text = text[:22] + '…'
-        self.canvas.itemconfigure(self._label, text=text)
-
-    def _update_text(self):
-        if self._state == 'recording':
-            text = 'Диктовка…'
-        elif self._state == 'processing':
-            text = 'Обработка…'
-        else:
-            text = self._message
-        if len(text) > 18:
-            text = text[:18] + '…'
-        self.canvas.itemconfigure(self._label, text=text)
+        self.canvas.itemconfigure(self._label, text=self._fit_text(text))

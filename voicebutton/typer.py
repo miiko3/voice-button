@@ -2,11 +2,16 @@ import ctypes
 import time
 from ctypes import wintypes
 
-user32 = ctypes.windll.user32
-kernel32 = ctypes.windll.kernel32
+user32 = ctypes.WinDLL('user32')
+kernel32 = ctypes.WinDLL('kernel32')
 
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
+INPUT_KEYBOARD = 1
+VK_RETURN = 0x0D
+VK_TAB = 0x09
+BATCH_CHARS = 24
+BATCH_PAUSE = 0.008
 
 
 class _KEYBDINPUT(ctypes.Structure):
@@ -47,27 +52,52 @@ class _INPUT(ctypes.Structure):
 
 
 user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(_INPUT), ctypes.c_int]
+user32.SendInput.restype = wintypes.UINT
 
 
-def _send_unicode(code, keyup):
-    flags = KEYEVENTF_UNICODE | (KEYEVENTF_KEYUP if keyup else 0)
-    item = _INPUT()
-    item.type = 1
-    item.u.ki = _KEYBDINPUT(wVk=0, wScan=code, dwFlags=flags, time=0, dwExtraInfo=None)
-    user32.SendInput(1, ctypes.byref(item), ctypes.sizeof(_INPUT))
+def _code(char):
+    value = ord(char)
+    if value > 0xFFFF:
+        value -= 0x10000
+        return [0xD800 + (value >> 10), 0xDC00 + (value & 0x3FF)]
+    return [value]
 
 
-def _type_char(char):
-    code = ord(char)
-    if code > 0xFFFF:
-        code -= 0x10000
-        units = [0xD800 + (code >> 10), 0xDC00 + (code & 0x3FF)]
-    else:
-        units = [code]
-    for unit in units:
-        _send_unicode(unit, False)
-        _send_unicode(unit, True)
-    time.sleep(0.004)
+def _plan(text):
+    events = []
+    for char in text:
+        if char == '\n':
+            events.append((VK_RETURN, 0))
+            events.append((VK_RETURN, KEYEVENTF_KEYUP))
+            continue
+        if char == '\t':
+            events.append((VK_TAB, 0))
+            events.append((VK_TAB, KEYEVENTF_KEYUP))
+            continue
+        for unit in _code(char):
+            events.append((unit, KEYEVENTF_UNICODE))
+            events.append((unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP))
+    return events
+
+
+def _flush(batch):
+    if not batch:
+        return
+    items = (_INPUT * len(batch))()
+    for index, (unit, flags) in enumerate(batch):
+        items[index].type = INPUT_KEYBOARD
+        items[index].u.ki = _KEYBDINPUT(wVk=0, wScan=unit, dwFlags=flags, time=0, dwExtraInfo=None)
+    user32.SendInput(len(batch), items, ctypes.sizeof(_INPUT))
+
+
+def type_text(text, batch_chars=BATCH_CHARS):
+    if not text:
+        return
+    events = _plan(text)
+    limit = max(2, batch_chars * 2)
+    for start in range(0, len(events), limit):
+        _flush(events[start:start + limit])
+        time.sleep(BATCH_PAUSE)
 
 
 def foreground_handle():
@@ -93,11 +123,3 @@ def focus_window(hwnd):
     except Exception:
         pass
     time.sleep(0.1)
-
-
-def type_text(text):
-    if not text:
-        return
-    for char in text:
-        _type_char(char)
-    time.sleep(0.05)

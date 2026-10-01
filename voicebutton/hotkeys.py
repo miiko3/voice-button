@@ -25,20 +25,20 @@ class HotkeyChord:
         if key is None:
             return False
         if is_down:
-            if key not in MODIFIERS:
-                return False
-            self.pressed.add(key)
             if self.recording:
                 return True
+            if key in self.pressed:
+                return True
+            self.pressed.add(key)
             if self.pressed.issuperset(CHORD):
                 self.recording = True
+                self.pressed = set()
                 self.on_start()
                 return True
-            if len(self.pressed) >= 2:
-                return True
-            return False
+            return len(self.pressed) >= 2
         self.pressed.discard(key)
         if self.recording and key in MODIFIERS:
             self.recording = False
+            self.pressed.clear()
             self.on_stop()
         return False

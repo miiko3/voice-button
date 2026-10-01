@@ -6,22 +6,40 @@ datas = [('assets', 'assets'), ('models', 'models')]
 binaries = []
 hiddenimports = []
 
-for package in ('vosk',):
-    d, b, h = collect_all(package)
-    datas += d
-    binaries += b
-    hiddenimports += h
+d, b, h = collect_all('vosk')
+datas += d
+binaries += b
+hiddenimports += h
+
+excludes = [
+    'numpy',
+    'scipy',
+    'pandas',
+    'matplotlib',
+    'PIL',
+    'tkinter.test',
+    'test',
+    'unittest',
+    'pydoc_data',
+    'requests',
+    'urllib3',
+    'certifi',
+    'srt',
+    'tqdm',
+    'setuptools',
+    'pip',
+]
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,
-    hiddenimports=hiddenimports + ['tkinter'],
+    hiddenimports=hiddenimports + ['tkinter', 'sounddevice'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excludes,
     noarchive=False,
 )
 
