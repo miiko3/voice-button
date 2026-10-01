@@ -47,7 +47,18 @@ def test_pcm_from_samples_accepts_bytes_and_floats():
     assert out == frame([0, 32767, -32767])
 
 
+def has_input_device():
+    try:
+        import sounddevice as sd
+
+        return any(device['max_input_channels'] > 0 for device in sd.query_devices())
+    except Exception:
+        return False
+
+
 def test_recorder_starts_and_stops():
+    if not has_input_device():
+        pytest.skip('no input device available')
     recorder = Recorder()
     chunks = []
     levels = []
